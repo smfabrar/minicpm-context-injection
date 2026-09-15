@@ -1,0 +1,9 @@
+MiniCPM-o context-injection evidence harness
+
+The runtime patch in patches/context-injection.patch modifies files from
+tc-mb/llama.cpp-omni at commit 64d092c60db4b4ee45768476bd752f03fdcc98ea.
+That project is distributed under the Apache License 2.0.
+
+This repository was developed with meaningful AI coding assistance. The human
+maintainer must review, understand, and take responsibility for the code before
+proposing changes to an upstream project.

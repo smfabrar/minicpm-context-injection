@@ -1,0 +1,4 @@
+huggingface_hub>=0.34,<2
+numpy>=1.26
+pandas>=2.0
+

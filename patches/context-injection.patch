@@ -1,0 +1,202 @@
+diff --git a/tools/omni/omni.cpp b/tools/omni/omni.cpp
+index 3e029c6..2908973 100644
+--- a/tools/omni/omni.cpp
++++ b/tools/omni/omni.cpp
+@@ -3880,6 +3880,7 @@ std::atomic<bool> t2w_thread_running(true);
+ struct DuplexEncodeReq {
+     std::string aud_fname;
+     std::string img_fname;
++    std::string user_text;
+     int         index;
+     int         max_slice_nums;  // -1 = 使用全局
+ };
+@@ -3887,6 +3888,7 @@ struct DuplexEncodeReq {
+ struct DuplexPrefillPacket {
+     std::vector<std::vector<float>> vision_embed;  // [0]=overview, [1..]=slices
+     std::vector<float>              audio_embed;
++    std::string                     user_text;
+     int                             index = 0;
+ };
+ 
+@@ -3946,7 +3948,8 @@ static void duplex_stop_threads(omni_context * ctx_omni);
+ static bool duplex_prefill(omni_context * ctx_omni,
+                            const std::string & aud_fname,
+                            const std::string & img_fname,
+-                           int index, int max_slice_nums);
++                           int index, int max_slice_nums,
++                           const std::string & user_text);
+ static bool duplex_decode(omni_context * ctx_omni,
+                           const std::string & debug_dir,
+                           int round_idx);
+@@ -9373,6 +9376,7 @@ static void duplex_encoder_thread_func(omni_context * ctx_omni, common_params *
+ 
+         DuplexPrefillPacket * packet = new DuplexPrefillPacket();
+         packet->index = req->index;
++        packet->user_text = std::move(req->user_text);
+ 
+         const bool has_img = !req->img_fname.empty() && ctx_omni->ctx_vision != nullptr;
+         const bool has_aud = !req->aud_fname.empty();
+@@ -9631,6 +9635,10 @@ static bool duplex_do_prefill_one_fused(omni_context * ctx_omni, common_params *
+     DuplexPipeline * dup = ctx_omni->duplex;
+     if (!dup->emb_cache.initialized) return false;
+     if (dup->emb_cache.hidden_size != hidden_size) return false;
++    // Dynamic text is deliberately handled by the multi-step path below. It
++    // tokenizes through the loaded vocabulary and keeps the first experiment
++    // easy to audit; fixed-token fusion can be extended after semantic tests.
++    if (!packet->user_text.empty()) return false;
+ 
+     auto t_begin  = std::chrono::high_resolution_clock::now();
+     int  n_past_0 = ctx_omni->n_past;
+@@ -9711,7 +9719,7 @@ static bool duplex_do_prefill_one_fused(omni_context * ctx_omni, common_params *
+     return true;
+ }
+ 
+-static void duplex_do_prefill_one(omni_context * ctx_omni, common_params * params,
++static bool duplex_do_prefill_one(omni_context * ctx_omni, common_params * params,
+                                   DuplexPrefillPacket * packet,
+                                   int hidden_size) {
+     auto t_begin   = std::chrono::high_resolution_clock::now();
+@@ -9730,6 +9738,17 @@ static void duplex_do_prefill_one(omni_context * ctx_omni, common_params * param
+             ? (int)(packet->audio_embed.size() / hidden_size) : 0;
+         bool has_audio  = (n_audio_tokens > 0);
+         bool has_vision = !packet->vision_embed.empty();
++        bool has_text   = !packet->user_text.empty();
++        auto eval_context_text = [&]() {
++            const int before = ctx_omni->n_past;
++            const bool ok = eval_string(ctx_omni, params, packet->user_text.c_str(),
++                                        params->n_batch, &ctx_omni->n_past, false);
++            if (ctx_omni->context_eval_cb) {
++                ctx_omni->context_eval_cb(packet->index, packet->user_text, ok,
++                                          before, ctx_omni->n_past);
++            }
++            return ok;
++        };
+ 
+         if (has_vision) {
+             int n_chunks         = (int)packet->vision_embed.size();
+@@ -9755,6 +9774,9 @@ static void duplex_do_prefill_one(omni_context * ctx_omni, common_params * param
+                 eval_string(ctx_omni, params, "\n",
+                             params->n_batch, &ctx_omni->n_past, false);
+             }
++            if (has_text) {
++                if (!eval_context_text()) return false;
++            }
+             if (has_audio) {
+                 // duplex 下 audio 直接跟在 vision 后面（无 audio_start/end 标签）
+                 prefill_with_emb(ctx_omni, params, packet->audio_embed.data(),
+@@ -9764,6 +9786,9 @@ static void duplex_do_prefill_one(omni_context * ctx_omni, common_params * param
+             // 纯音频 unit
+             eval_string(ctx_omni, params, "<unit>",
+                         params->n_batch, &ctx_omni->n_past, false);
++            if (has_text) {
++                if (!eval_context_text()) return false;
++            }
+             if (has_audio) {
+                 prefill_with_emb(ctx_omni, params, packet->audio_embed.data(),
+                                  n_audio_tokens, params->n_batch, &ctx_omni->n_past);
+@@ -9771,7 +9796,9 @@ static void duplex_do_prefill_one(omni_context * ctx_omni, common_params * param
+         }
+ 
+         if (ctx_omni->sliding_window_config.mode != "off") {
+-            std::string input_type = has_vision ? "omni" : "audio";
++            std::string input_type = has_vision ? "omni"
++                                   : has_audio  ? "audio"
++                                   :              "text";
+             sliding_window_register_unit_end(ctx_omni, input_type, {}, false);
+         }
+     }
+@@ -9786,6 +9813,7 @@ static void duplex_do_prefill_one(omni_context * ctx_omni, common_params * param
+         "[prof] llm prefill n_past=%d->%d tokens=%d ms=%.1f\n",
+         n_past_0, ctx_omni->n_past,
+         ctx_omni->n_past - n_past_0, ms);
++    return true;
+ }
+ 
+ // ---------------------------------------------------------------------------
+@@ -10171,12 +10199,19 @@ static void duplex_llm_thread_func(omni_context * ctx_omni, common_params * para
+ 
+             if (packet) {
+                 // Stage 3: 先试 fused（1 次 llama_decode），失败回退到老 5-7 段路径。
++                bool prefill_ok = true;
+                 if (!duplex_do_prefill_one_fused(ctx_omni, params, packet, hidden_size)) {
+-                    duplex_do_prefill_one(ctx_omni, params, packet, hidden_size);
++                    prefill_ok = duplex_do_prefill_one(ctx_omni, params, packet, hidden_size);
+                 }
+                 delete packet;
+                 dup->in_flight_prefill.fetch_sub(1);
+                 dup->in_flight_cv.notify_all();
++                if (!prefill_ok) {
++                    decode_req->ok.store(false);
++                    decode_req->done.store(true);
++                    dup->decode_done_cv.notify_all();
++                    continue;
++                }
+             }
+         }
+ 
+@@ -10201,7 +10236,8 @@ static void duplex_llm_thread_func(omni_context * ctx_omni, common_params * para
+ static bool duplex_prefill(omni_context * ctx_omni,
+                            const std::string & aud_fname,
+                            const std::string & img_fname,
+-                           int index, int max_slice_nums) {
++                           int index, int max_slice_nums,
++                           const std::string & user_text) {
+     if (!ctx_omni || !ctx_omni->duplex) {
+         LOG_ERR("duplex_prefill: pipeline not initialized\n");
+         return false;
+@@ -10211,6 +10247,7 @@ static bool duplex_prefill(omni_context * ctx_omni,
+     DuplexEncodeReq * req = new DuplexEncodeReq();
+     req->aud_fname      = aud_fname;
+     req->img_fname      = img_fname;
++    req->user_text      = user_text;
+     req->index          = index;
+     req->max_slice_nums = max_slice_nums;
+ 
+@@ -10282,7 +10319,7 @@ bool stream_prefill(struct omni_context * ctx_omni, std::string aud_fname, std::
+     //   仍沿用下方原逻辑；线程启动点会在原逻辑末尾调用 duplex_start_threads。
+     if (ctx_omni->duplex_mode && ctx_omni->async && index > 0
+         && ctx_omni->system_prompt_initialized && ctx_omni->duplex != nullptr) {
+-        return duplex_prefill(ctx_omni, aud_fname, img_fname, index, max_slice_nums);
++        return duplex_prefill(ctx_omni, aud_fname, img_fname, index, max_slice_nums, text);
+     }
+ 
+     // 只有在新一轮开始时 (index == 0) 才需要等待上一轮 TTS 完成
+@@ -11449,7 +11486,8 @@ static void duplex_session_prefill_worker_func(omni_context * ctx_omni) {
+ 
+         // 调底层 stream_prefill。duplex 路径下这是非阻塞的（推到 encoder_queue 立即返回）。
+         bool ok = stream_prefill(ctx_omni, pf.frame.aud_fname, pf.frame.img_fname,
+-                                 (int)pf.frame_id, pf.frame.max_slice_nums);
++                                 (int)pf.frame_id, pf.frame.max_slice_nums,
++                                 pf.frame.user_text);
+ 
+         OmniDuplexInflightFrame inf;
+         inf.frame_id       = pf.frame_id;
+diff --git a/tools/omni/omni.h b/tools/omni/omni.h
+index ab524b3..1254c61 100644
+--- a/tools/omni/omni.h
++++ b/tools/omni/omni.h
+@@ -467,6 +467,9 @@ struct omni_context {
+     llama_token tts_bos_token_id = -1;           // <|tts_bos|>: TTS 开始（用于双工强制继续说话）
+     llama_token special_token_unit_end = -1;     // </unit>: unit 结束标记（双工 chunk 边界）
+     llama_token special_token_tts_pad = -1;      // <|tts_pad|>: TTS 填充（双工模式下禁止采样）
++    // Optional experiment observer: runs on the LLM owner thread after text eval.
++    // Arguments: input index, text, eval success, KV positions before/after.
++    std::function<void(int, const std::string &, bool, int, int)> context_eval_cb;
+ };
+ 
+ //
+@@ -539,6 +542,7 @@ bool stream_decode(struct omni_context * ctx_omni,
+ struct OmniDuplexFrame {
+     std::string aud_fname;          // 该帧音频文件路径，空字符串表示无音频
+     std::string img_fname;          // 该帧图片文件路径，空字符串表示无图片
++    std::string user_text;          // 与本帧音频配对的动态文本上下文，可空
+     int max_slice_nums = -1;        // 与 stream_prefill 同义；-1 表示用全局
+     int64_t user_seq = 0;           // 调用方自定义序号，原样回传到 result
+ };
+@@ -628,4 +632,4 @@ void sliding_window_reset(struct omni_context * ctx_omni);
+ void vision_set_max_slice_nums(struct vision_ctx * ctx_vision, int max_slice_nums);
+ 
+ // benchmark: serial vs batched vision encoding
+-void omni_bench_vision(struct vision_ctx * ctx_vision, int n_threads, const char * image_path);
+\ No newline at end of file
++void omni_bench_vision(struct vision_ctx * ctx_vision, int n_threads, const char * image_path);
