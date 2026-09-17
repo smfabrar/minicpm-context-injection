@@ -27,6 +27,14 @@ tag incorrectly says Python 3.6 despite the published Python 3 wheel. Setup
 requires that this is the only pip-check error, confirms the exact stale tag on
 Linux x86_64, and imports Decord's native library. Other dependency errors or
 binary import failures still stop setup. Existing Colab downloads are reused.
+GPTQModel 1.5.1's CI wheel omits its runtime dependency metadata. The lock
+therefore includes the release requirements explicitly, including
+`device-smi==0.3.3` and `sentencepiece==0.2.0`. Device-SMI is another pure Python
+source package and needs no CUDA compilation. Before model download, setup
+imports the complete runtime and numerically checks a small quantized layer on
+the assigned GPU. The model explicitly uses GPTQModel's `torch` backend, which
+uses prebuilt PyTorch operations and dequantizes one layer at a time; speed and
+transient memory still require measurement. No custom GPTQ CUDA kernel is used.
 Regenerate it with `python tools/make_t4_notebook.py` (requires `nbformat`).
 
 The native GGUF experiment below remains available as a separate implementation.

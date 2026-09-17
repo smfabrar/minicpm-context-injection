@@ -18,6 +18,7 @@ from pathlib import Path
 
 MODEL_ID = "openbmb/MiniCPM-o-4_5-GPTQ"
 MODEL_REVISION = "02b54c54c36f8b48e97501bb0fde5d178c62df38"
+GPTQ_BACKEND = "torch"
 SYSTEM_PROMPT = (
     "Streaming Audio Conversation. You are a helpful assistant. "
     "External context supplies the current room assignment. A newer assignment "
@@ -177,7 +178,7 @@ def run_condition(duplex, root, ref_audio, ref_path, *, old_code, new_code=None,
     session = EvidenceSession(duplex, directory, ref_audio, ref_path)
     manifest = dict(model_id=MODEL_ID, model_revision=MODEL_REVISION, seed=seed,
                     condition=label, dtype="float16", init_vision=False, attention="sdpa",
-                    sliding_window="off", decoder_source_sha256=hashlib.sha256(
+                    gptq_backend=GPTQ_BACKEND, sliding_window="off", decoder_source_sha256=hashlib.sha256(
                         Path(inspect.getfile(type(duplex))).read_bytes()).hexdigest())
     (directory / "manifest.json").write_text(json.dumps(manifest, indent=2))
     try:
@@ -242,7 +243,8 @@ def main():
         torch_dtype=torch.float16, device_map={"": 0},
         init_vision=False, init_audio=True, init_tts=True,
         quantization_config=GPTQConfig(bits=4, group_size=128, desc_act=False, sym=True,
-                                      use_exllama=False, block_name_to_quantize="llm.model.layers"),
+                                      backend=GPTQ_BACKEND, use_exllama=False,
+                                      block_name_to_quantize="llm.model.layers"),
     ).eval()
     # All model modules stay on GPU; automatic CPU offload can break duplex TTS.
     duplex = model.as_duplex(enable_float16=True, sliding_window_mode="off")
@@ -253,10 +255,13 @@ def main():
     quantized = [name for name, module in model.named_modules() if hasattr(module, "qweight")]
     if not quantized:
         raise RuntimeError("No GPTQ quantized layers loaded")
+    if any(type(module).__name__ != "TorchQuantLinear" for module in model.modules() if hasattr(module, "qweight")):
+        raise RuntimeError("The model loaded a different quantization backend than requested")
     ref_path = Path(model_dir) / "assets" / "HT_ref_audio.wav"
     ref_audio, _ = librosa.load(str(ref_path), sr=16000, mono=True)
     environment = dict(gpu=torch.cuda.get_device_name(0), model_revision=MODEL_REVISION,
-                       quantized_layers=len(quantized), memory_allocated_gib=torch.cuda.memory_allocated() / 2**30,
+                       quantized_layers=len(quantized), gptq_backend=GPTQ_BACKEND,
+                       memory_allocated_gib=torch.cuda.memory_allocated() / 2**30,
                        packages={name: importlib.metadata.version(name) for name in
                                  ("torch", "transformers", "gptqmodel", "minicpmo-utils", "optimum")})
     (args.root / "environment.json").write_text(json.dumps(environment, indent=2))

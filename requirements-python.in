@@ -1,10 +1,13 @@
 # Python 3.11, Linux x86_64. Native packages use wheels; never compile CUDA.
-# minicpmo-utils 1.0.6 is a pure Python sdist with no published wheel.
+# minicpmo-utils and device-smi are pure Python sdists with no published wheels.
 --extra-index-url https://download.pytorch.org/whl/cu121
 torch==2.5.1+cu121
 torchaudio==2.5.1+cu121
 torchvision==0.20.1+cu121
 gptqmodel @ https://github.com/ModelCloud/GPTQModel/releases/download/v1.5.1/gptqmodel-1.5.1%2Bcu121torch2.5-cp311-cp311-linux_x86_64.whl
+# The CI-built GPTQModel wheel omits its requirements.txt dependencies.
+device-smi==0.3.3
+sentencepiece==0.2.0
 transformers==4.51.0
 optimum==1.26.1
 minicpmo-utils[all]==1.0.6

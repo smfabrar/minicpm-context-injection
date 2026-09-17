@@ -94,7 +94,7 @@ def setup_environment(workspace):
         _logged_command([uv, "venv", "--python", "3.11", "--seed", workspace.root / "venv"], log)
     print("Install matching PyTorch and GPTQ wheels", flush=True)
     _logged_command([workspace.python, "-m", "pip", "install", "--only-binary=:all:",
-                     "--no-binary=minicpmo-utils",
+                     "--no-binary=minicpmo-utils,device-smi",
                      "--extra-index-url", "https://download.pytorch.org/whl/cu121",
                      "-r", workspace.repository / "requirements-python.lock"], log)
     print("Install audio tools", flush=True)
@@ -112,17 +112,23 @@ def verify_environment(workspace, *, gpu=None):
     print("Verify dependencies and GPU imports", flush=True)
     _logged_command([workspace.python, workspace.repository / "minicpm_injection" / "check_t4_environment.py"],
                     log, verbose=True)
-    _logged_command([workspace.python, "-c",
-        "import torch,transformers,gptqmodel,stepaudio2; "
-        "assert torch.cuda.is_available(); "
-        "print('PyTorch:',torch.__version__,'Transformers:',transformers.__version__); "
-        "print('GPU:',torch.cuda.get_device_name(0))"], log, verbose=True)
+    _logged_command([workspace.python, workspace.repository / "minicpm_injection" / "check_t4_gpu.py"],
+                    log, verbose=True)
     if gpu is None:
         gpu = subprocess.check_output([
             "nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader"], text=True).strip()
     display(HTML(_table(["GPU", "Precision", "Vision", "CUDA source build"],
                         [[gpu, "GPTQ 4-bit / FP16", "Disabled", "None"]])))
     print("Environment checks passed. Full log:", log)
+
+
+def repair_gptq_dependencies(workspace):
+    """Repair the missing wheel requirements without reinstalling PyTorch."""
+    print("Install the two omitted GPTQModel runtime requirements", flush=True)
+    _logged_command([workspace.python, "-m", "pip", "install", "--only-binary=:all:",
+                     "--no-binary=device-smi", "device-smi==0.3.3", "sentencepiece==0.2.0"],
+                    workspace.root / "setup.log", verbose=True)
+    verify_environment(workspace)
 
 
 def run_evidence(workspace, *, mid_speech=False, token=None):
