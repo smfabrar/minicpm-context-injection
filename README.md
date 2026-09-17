@@ -1,5 +1,30 @@
 # MiniCPM-o context injection during duplex speech
 
+For a **Colab T4 without a native CUDA build**, use
+[`notebooks/official_t4_context_injection_colab.ipynb`](notebooks/official_t4_context_injection_colab.ipynb).
+It loads OpenBMB's [official GPTQ 4-bit model](https://huggingface.co/openbmb/MiniCPM-o-4_5-GPTQ)
+through Transformers, disables vision, uses FP16 and SDPA, and installs wheels in
+an isolated Python 3.11 environment. Large code lives in the repository; the
+notebook contains short cells and explanations. The official card estimates about 11 GB GPU
+memory; duplex/TTS headroom and throughput still require measurement on the T4.
+This setup has not yet been validated by a GPU run.
+
+The notebook uses the official duplex `streaming_prefill(text_list=[...])` API.
+Separate text-only units avoid the mixed audio/text path's pending logits being
+computed before text is appended. It checks exact text-token schema and KV
+growth, baseline recall, corrected recall across two later exchanges, and a
+matched control. An additional experiment inserts the update between generated
+audio chunks of the same turn. Each condition prepares its session once.
+Dependency, GPU-loading and runtime failures are preserved as errors. Native
+dependencies use wheels; `minicpmo-utils==1.0.6` is allowed to package its pure
+Python source because that release has no published wheel. No CUDA compilation
+is requested. The notebook clones a published implementation commit, displays
+verdict and answer tables plus speech players, and saves
+`context_injection_results.ipynb` with actual result outputs after each experiment.
+Regenerate it with `python tools/make_t4_notebook.py` (requires `nbformat`).
+
+The native GGUF experiment below remains available as a separate implementation.
+
 This repository asks one narrow question:
 
 > Can new text be inserted into an already-running MiniCPM-o 4.5 conversation,
