@@ -71,8 +71,6 @@ def _logged_command(command, log_path, *, env=None, verbose=False):
 
 def setup_environment(workspace):
     """Use native wheels and allow packaging the pure Python MiniCPM utils."""
-    from IPython.display import HTML, display
-
     if not shutil.which("nvidia-smi"):
         raise RuntimeError("Select Runtime > Change runtime type > T4 GPU")
     gpu = subprocess.check_output([
@@ -102,15 +100,29 @@ def setup_environment(workspace):
     print("Install audio tools", flush=True)
     _logged_command(["apt-get", "update", "-qq"], log)
     _logged_command(["apt-get", "install", "-y", "-qq", "ffmpeg", "espeak-ng", "libsndfile1"], log)
-    _logged_command([workspace.python, "-m", "pip", "check"], log)
+    verify_environment(workspace, gpu=gpu)
+    print("Setup complete. Full installation log:", log)
+
+
+def verify_environment(workspace, *, gpu=None):
+    """Resume the final checks without reinstalling successfully installed packages."""
+    from IPython.display import HTML, display
+
+    log = workspace.root / "setup.log"
+    print("Verify dependencies and GPU imports", flush=True)
+    _logged_command([workspace.python, workspace.repository / "minicpm_injection" / "check_t4_environment.py"],
+                    log, verbose=True)
     _logged_command([workspace.python, "-c",
         "import torch,transformers,gptqmodel,stepaudio2; "
         "assert torch.cuda.is_available(); "
         "print('PyTorch:',torch.__version__,'Transformers:',transformers.__version__); "
         "print('GPU:',torch.cuda.get_device_name(0))"], log, verbose=True)
+    if gpu is None:
+        gpu = subprocess.check_output([
+            "nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader"], text=True).strip()
     display(HTML(_table(["GPU", "Precision", "Vision", "CUDA source build"],
                         [[gpu, "GPTQ 4-bit / FP16", "Disabled", "None"]])))
-    print("Setup complete. Full installation log:", log)
+    print("Environment checks passed. Full log:", log)
 
 
 def run_evidence(workspace, *, mid_speech=False, token=None):

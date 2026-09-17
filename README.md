@@ -21,6 +21,12 @@ Python source because that release has no published wheel. No CUDA compilation
 is requested. The notebook clones a published implementation commit, displays
 verdict and answer tables plus speech players, and saves
 `context_injection_results.ipynb` with actual result outputs after each experiment.
+The dependency check handles only Decord 0.6.0's documented Linux wheel-tag
+defect ([upstream issue](https://github.com/dmlc/decord/issues/356)): its internal
+tag incorrectly says Python 3.6 despite the published Python 3 wheel. Setup
+requires that this is the only pip-check error, confirms the exact stale tag on
+Linux x86_64, and imports Decord's native library. Other dependency errors or
+binary import failures still stop setup. Existing Colab downloads are reused.
 Regenerate it with `python tools/make_t4_notebook.py` (requires `nbformat`).
 
 The native GGUF experiment below remains available as a separate implementation.
