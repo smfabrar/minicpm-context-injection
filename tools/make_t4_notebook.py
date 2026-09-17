@@ -5,7 +5,7 @@ import nbformat as n
 
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY_URL = "https://github.com/smfabrar/minicpm-context-injection.git"
-IMPLEMENTATION_COMMIT = "206db2610c28c0759720efc46e220b47bd603e73"
+IMPLEMENTATION_COMMIT = "b2420e3b66bd545b7ad88f0d74f0c081f8731941"
 markdown = n.v4.new_markdown_cell
 code = n.v4.new_code_cell
 notebook = n.v4.new_notebook()
@@ -84,6 +84,8 @@ We load the quantized language model with its audio encoder and speech output. V
 The GPTQ wheel needs matching Python, PyTorch and CUDA versions. Setup downloads prebuilt Python 3.11 and installs the pinned CUDA libraries from wheels. MiniCPM's utility package is distributed as pure Python source and is allowed to package itself; **no CUDA source is compiled**.
 
 This cell shows setup progress and a GPU summary. If installation fails, it shows the actual error and full log path. The notebook kernel stays unchanged; GPU inference runs in the isolated environment.
+
+Decord's published Linux wheel has a known stale Python 3.6 tag. Setup accepts that one metadata error only after confirming the tag and importing the native library. Every other dependency error stops setup. Rerunning setup reuses installed packages and downloads.
 """),
     code("setup_environment(workspace)\n"),
     markdown("""## 3. Optional Hugging Face authentication
