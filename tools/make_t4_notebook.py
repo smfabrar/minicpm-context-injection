@@ -5,7 +5,7 @@ import nbformat as n
 
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY_URL = "https://github.com/smfabrar/minicpm-context-injection.git"
-IMPLEMENTATION_COMMIT = "b2420e3b66bd545b7ad88f0d74f0c081f8731941"
+IMPLEMENTATION_COMMIT = "278031f4a9a5b5427f7d7aae612aadc4b56d7881"
 markdown = n.v4.new_markdown_cell
 code = n.v4.new_code_cell
 notebook = n.v4.new_notebook()
@@ -81,7 +81,9 @@ print("Implementation commit:", actual_commit)
 
 We load the quantized language model with its audio encoder and speech output. Vision is disabled. The T4 uses **FP16** and **SDPA attention**.
 
-The GPTQ wheel needs matching Python, PyTorch and CUDA versions. Setup downloads prebuilt Python 3.11 and installs the pinned CUDA libraries from wheels. MiniCPM's utility package is distributed as pure Python source and is allowed to package itself; **no CUDA source is compiled**.
+The GPTQ wheel needs matching Python, PyTorch and CUDA versions. Setup downloads prebuilt Python 3.11 and installs the pinned CUDA libraries from wheels. MiniCPM's utilities and Device-SMI are distributed as pure Python source and are allowed to package themselves; **no CUDA source is compiled**.
+
+The prebuilt GPTQModel wheel omits its runtime requirements, so our lock lists them explicitly. Setup imports the complete runtime and checks a small quantized layer on the GPU before downloading model weights. We select the **PyTorch GPTQ backend**, which uses prebuilt PyTorch operations and dequantizes each layer as needed. Its speed and temporary memory use will be measured during the experiment.
 
 This cell shows setup progress and a GPU summary. If installation fails, it shows the actual error and full log path. The notebook kernel stays unchanged; GPU inference runs in the isolated environment.
 
