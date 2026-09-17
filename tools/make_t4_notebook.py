@@ -5,7 +5,7 @@ import nbformat as n
 
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY_URL = "https://github.com/smfabrar/minicpm-context-injection.git"
-IMPLEMENTATION_COMMIT = "main"  # Pin the published implementation before delivery.
+IMPLEMENTATION_COMMIT = "206db2610c28c0759720efc46e220b47bd603e73"
 markdown = n.v4.new_markdown_cell
 code = n.v4.new_code_cell
 notebook = n.v4.new_notebook()
